@@ -75,7 +75,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
              isVideoAnimatingRef.current = true;
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); 
+             fwdVid.playbackRate = 1.0 + (speedProgress * 6.0); 
              if (fwdVid.paused) fwdVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
@@ -94,7 +94,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
              isVideoAnimatingRef.current = true;
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             revVid.playbackRate = 0.5 + (speedProgress * 3.5); 
+             revVid.playbackRate = 1.0 + (speedProgress * 6.0); 
              if (revVid.paused) revVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
