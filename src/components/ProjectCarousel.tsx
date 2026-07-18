@@ -103,12 +103,15 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           const current = fwdVid.currentTime;
           const diff = forwardTarget - current;
           
-          if (Math.abs(diff) > 0.02) {
+          if (diff > 0.05) {
              isVideoAnimatingRef.current = true;
-             // Buttery smooth lerp (snaps fast but eases perfectly)
-             fwdVid.currentTime = current + (diff * 0.15); 
+             const distance = Math.abs(diff);
+             const speedProgress = Math.min(distance / 1.5, 1.0);
+             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); 
+             if (fwdVid.paused) fwdVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
+                fwdVid.pause();
                 fwdVid.currentTime = forwardTarget;
                 isVideoAnimatingRef.current = false;
              }
@@ -119,11 +122,15 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           const current = revVid.currentTime;
           const diff = reverseTarget - current;
           
-          if (Math.abs(diff) > 0.02) {
+          if (diff > 0.05) {
              isVideoAnimatingRef.current = true;
-             revVid.currentTime = current + (diff * 0.15); 
+             const distance = Math.abs(diff);
+             const speedProgress = Math.min(distance / 1.5, 1.0);
+             revVid.playbackRate = 0.5 + (speedProgress * 3.5); 
+             if (revVid.paused) revVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
+                revVid.pause();
                 revVid.currentTime = reverseTarget;
                 isVideoAnimatingRef.current = false;
              }
