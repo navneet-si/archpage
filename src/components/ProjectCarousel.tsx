@@ -18,9 +18,13 @@ const data = [
     }
 ];
 
+// Global cache to prevent re-fetching blobs when component unmounts/remounts
+const globalBlobCache: Record<string, string> = {};
+
 export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
   const container = useRef<HTMLDivElement>(null);
   
+  const [blobsReady, setBlobsReady] = useState(false);
   const [activeCardIndex, setActiveCardIndex] = useState(0); 
   const activeCardIndexRef = useRef(0);
   
@@ -28,6 +32,33 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
   const targetTimeRef = useRef(data[0].checkpoints[0]);
   const isVideoAnimatingRef = useRef(false);
   const activeDirectionRef = useRef<'forward' | 'backward'>('forward');
+
+  // Preload videos into Blobs for zero-lag scrubbing
+  useEffect(() => {
+    let mounted = true;
+    const fetchBlobs = async () => {
+       const urls = data.flatMap(d => [d.videoUrl, d.reversedVideoUrl]);
+       const toFetch = urls.filter(url => !globalBlobCache[url]);
+       
+       if (toFetch.length > 0) {
+          await Promise.all(toFetch.map(async (url) => {
+             try {
+                const res = await fetch(url);
+                const blob = await res.blob();
+                globalBlobCache[url] = URL.createObjectURL(blob);
+             } catch(e) {
+                console.error("Failed to fetch", url, e);
+                globalBlobCache[url] = url; // fallback
+             }
+          }));
+       }
+       if (mounted) {
+          setBlobsReady(true);
+       }
+    };
+    fetchBlobs();
+    return () => { mounted = false; };
+  }, []);
 
   // Next Project Handler
   const handleNextProject = () => {
@@ -43,6 +74,8 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
 
   // 1. Dual-Video Animation Engine
   useEffect(() => {
+    if (!blobsReady) return;
+
     const fwdVid = document.getElementById(`fwd-vid-${activeCardIndex}`) as HTMLVideoElement;
     const revVid = document.getElementById(`rev-vid-${activeCardIndex}`) as HTMLVideoElement;
     if (!fwdVid || !revVid) return;
@@ -63,7 +96,6 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
     const renderLoop = () => {
       if (fwdVid.readyState >= 1 && revVid.readyState >= 1 && fwdVid.duration) {
         const duration = fwdVid.duration; 
-        // Clamp the target so we don't try to seek past the actual video length
         const forwardTarget = Math.min(targetTimeRef.current, duration - 0.05);
         const activeDir = activeDirectionRef.current;
 
@@ -74,8 +106,9 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           if (diff > 0.05) {
              isVideoAnimatingRef.current = true;
              const distance = Math.abs(diff);
-             const speedProgress = Math.min(distance / 0.5, 1.0);
-             fwdVid.playbackRate = 1.0 + (speedProgress * 11.0); 
+             // Reverted to original speed physics
+             const speedProgress = Math.min(distance / 1.5, 1.0);
+             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); 
              if (fwdVid.paused) fwdVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
@@ -93,8 +126,9 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           if (diff > 0.05) {
              isVideoAnimatingRef.current = true;
              const distance = Math.abs(diff);
-             const speedProgress = Math.min(distance / 0.5, 1.0);
-             revVid.playbackRate = 1.0 + (speedProgress * 11.0); 
+             // Reverted to original speed physics
+             const speedProgress = Math.min(distance / 1.5, 1.0);
+             revVid.playbackRate = 0.5 + (speedProgress * 3.5); 
              if (revVid.paused) revVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
@@ -111,10 +145,12 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
 
     animationFrameId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [activeCardIndex]);
+  }, [activeCardIndex, blobsReady]);
 
   // 2. Scroll and Touch Input Handling
   useEffect(() => {
+    if (!blobsReady) return;
+
     let isCoolingDown = false;
     let touchStartY = 0;
 
@@ -195,7 +231,16 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
       window.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('touchmove', handleTouchMove);
     };
-  }, []);
+  }, [blobsReady]);
+
+  if (!blobsReady) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center font-inter text-white">
+         <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin mb-6" />
+         <p className="text-white/60 tracking-[0.2em] text-xs uppercase">Initializing Engine</p>
+      </div>
+    );
+  }
 
   return (
     <div ref={container} className="fixed inset-0 z-[100] bg-black overflow-hidden font-inter text-white/90">
@@ -213,25 +258,23 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           >
             <video
               id={`fwd-vid-${activeCardIndex}`} 
+              src={globalBlobCache[data[activeCardIndex].videoUrl] || data[activeCardIndex].videoUrl}
               className="absolute inset-0 w-full h-full object-cover pointer-events-none transition-opacity duration-150"
               style={{ opacity: 1 }}
               preload="auto"
               muted
               playsInline
-            >
-              <source src={data[activeCardIndex].videoUrl} type="video/mp4" />
-            </video>
+            />
 
             <video
               id={`rev-vid-${activeCardIndex}`} 
+              src={globalBlobCache[data[activeCardIndex].reversedVideoUrl] || data[activeCardIndex].reversedVideoUrl}
               className="absolute inset-0 w-full h-full object-cover pointer-events-none transition-opacity duration-150"
               style={{ opacity: 0 }}
               preload="auto"
               muted
               playsInline
-            >
-              <source src={data[activeCardIndex].reversedVideoUrl} type="video/mp4" />
-            </video>
+            />
             
             {/* Dark overlay for readability */}
             <div className="absolute inset-0 bg-black/30 z-20 pointer-events-none" />
@@ -285,7 +328,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           >
             {/* Thumbnail Video paused at 0 */}
             <video 
-              src={data[activeCardIndex].videoUrl} 
+              src={globalBlobCache[data[activeCardIndex].videoUrl] || data[activeCardIndex].videoUrl} 
               className="absolute inset-0 w-full h-full object-cover" 
               preload="metadata"
             />
