@@ -4,8 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ProjectCarousel from '@/components/ProjectCarousel';
 
-const globalBlobCache: Record<string, string> = {};
-
 // The specific timestamps to pause at (in the forward timeline)
 const CHECKPOINTS = [0, 5.5, 10];
 
@@ -13,7 +11,6 @@ export default function Home() {
   const forwardVideoRef = useRef<HTMLVideoElement>(null);
   const reverseVideoRef = useRef<HTMLVideoElement>(null);
   
-  const [blobsReady, setBlobsReady] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [mousePos, setMousePos] = useState({ x: -100, y: -100 });
   const [isHoveringLink, setIsHoveringLink] = useState(false);
@@ -21,34 +18,11 @@ export default function Home() {
   const activeProjectRef = useRef<string | null>(null);
   
   const targetTimeRef = useRef(CHECKPOINTS[0]);
-  const virtualTimeRef = useRef(CHECKPOINTS[0]);
   const isAnimatingRef = useRef(false);
   const activeDirectionRef = useRef<'forward' | 'backward'>('forward');
 
-  // 0. Preload Blobs
-  useEffect(() => {
-     const loadVideos = async () => {
-        const urls = ['/new_tour.mp4', '/new_tour_reversed.mp4'];
-        for (const url of urls) {
-           if (!globalBlobCache[url]) {
-              try {
-                 const res = await fetch(url);
-                 const blob = await res.blob();
-                 globalBlobCache[url] = URL.createObjectURL(blob);
-              } catch (e) {
-                 console.error("Failed to fetch blob for", url, e);
-              }
-           }
-        }
-        setBlobsReady(true);
-     };
-     loadVideos();
-  }, []);
-
   // 1. Dual-Video Animation Engine
   useEffect(() => {
-    if (!blobsReady) return;
-    
     const fwdVid = forwardVideoRef.current;
     const revVid = reverseVideoRef.current;
     if (!fwdVid || !revVid) return;
@@ -68,22 +42,21 @@ export default function Home() {
 
         // --- FORWARD SCROLLING ---
         if (activeDir === 'forward') {
-          const current = virtualTimeRef.current;
+          const current = fwdVid.currentTime;
           const diff = forwardTarget - current;
           
-          if (Math.abs(diff) > 0.02) {
+          if (diff > 0.05) {
              isAnimatingRef.current = true;
              
+             // Dynamic Cinematic Easing
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
+             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); // Max 4.0x
              
-             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
-             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
-             fwdVid.currentTime = virtualTimeRef.current;
+             if (fwdVid.paused) fwdVid.play().catch(()=>{});
           } else {
              if (isAnimatingRef.current) {
-                virtualTimeRef.current = forwardTarget;
+                fwdVid.pause();
                 fwdVid.currentTime = forwardTarget;
                 isAnimatingRef.current = false;
              }
@@ -92,23 +65,22 @@ export default function Home() {
         // --- BACKWARD SCROLLING (Via Pre-Calculated Reversed Video) ---
         else {
           const reverseTarget = duration - forwardTarget;
-          const current = virtualTimeRef.current;
+          const current = revVid.currentTime;
           const diff = reverseTarget - current;
           
           // We are playing the REVERSED video FORWARD towards the reverseTarget!
-          if (Math.abs(diff) > 0.02) {
+          if (diff > 0.05) {
              isAnimatingRef.current = true;
              
+             // Same dynamic easing, but applied to the reversed video
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
+             revVid.playbackRate = 0.5 + (speedProgress * 3.5); // Max 4.0x
              
-             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
-             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
-             revVid.currentTime = virtualTimeRef.current;
+             if (revVid.paused) revVid.play().catch(()=>{});
           } else {
              if (isAnimatingRef.current) {
-                virtualTimeRef.current = reverseTarget;
+                revVid.pause();
                 revVid.currentTime = reverseTarget;
                 isAnimatingRef.current = false;
              }
@@ -122,11 +94,10 @@ export default function Home() {
     animationFrameId = requestAnimationFrame(renderLoop);
 
     return () => cancelAnimationFrame(animationFrameId);
-  }, [blobsReady]);
+  }, []);
 
   // 2. Scroll and Touch Input Handling
   useEffect(() => {
-    if (!blobsReady) return;
     let isCoolingDown = false;
     let touchStartY = 0;
 
@@ -146,9 +117,7 @@ export default function Home() {
         // If we were previously rewinding, sync the forward video to the reverse video's current position
         if (activeDirectionRef.current === 'backward') {
            activeDirectionRef.current = 'forward';
-           const newTime = Math.max(0, fwdVid.duration - virtualTimeRef.current);
-           virtualTimeRef.current = newTime;
-           fwdVid.currentTime = newTime;
+           fwdVid.currentTime = Math.max(0, fwdVid.duration - revVid.currentTime);
            fwdVid.style.opacity = '1';
            revVid.style.opacity = '0';
         }
@@ -162,9 +131,7 @@ export default function Home() {
         // If we were previously scrolling forward, sync the reverse video to the forward video's current position
         if (activeDirectionRef.current === 'forward') {
            activeDirectionRef.current = 'backward';
-           const newTime = Math.max(0, fwdVid.duration - virtualTimeRef.current);
-           virtualTimeRef.current = newTime;
-           revVid.currentTime = newTime;
+           revVid.currentTime = Math.max(0, fwdVid.duration - fwdVid.currentTime);
            fwdVid.style.opacity = '0';
            revVid.style.opacity = '1';
         }
@@ -219,37 +186,30 @@ export default function Home() {
       window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('mousemove', handleMouseMove);
     };
-  }, [blobsReady]);
-
-  if (!blobsReady) {
-    return (
-      <main className="bg-neutral-950 w-screen h-screen flex flex-col items-center justify-center text-white/50 tracking-[0.2em] text-xs font-light space-y-4">
-         <div className="w-8 h-8 border-t-white border-2 border-transparent rounded-full animate-spin"></div>
-         <div>INITIALIZING ARCHITECTURE</div>
-      </main>
-    );
-  }
+  }, []);
 
   return (
-<main className="bg-neutral-950 overflow-hidden w-screen h-screen">
+    <main className="bg-neutral-950 overflow-hidden w-screen h-screen">
       {/* Background Video Layer */}
       <div className="fixed inset-0 w-screen h-screen z-10 overflow-hidden bg-neutral-950">
         
         {/* Forward Video */}
         <video 
           ref={forwardVideoRef}
-          src={globalBlobCache['/new_tour.mp4'] || '/new_tour.mp4'}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
+          src="/new_tour.mp4"
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none"
           style={{ opacity: 1 }}
+          preload="auto"
           muted playsInline
         />
         
         {/* Reversed Video */}
         <video 
           ref={reverseVideoRef}
-          src={globalBlobCache['/new_tour_reversed.mp4'] || '/new_tour_reversed.mp4'}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
+          src="/new_tour_reversed.mp4"
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300 pointer-events-none"
           style={{ opacity: 0 }}
+          preload="auto"
           muted playsInline
         />
 

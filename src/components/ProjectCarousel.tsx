@@ -18,48 +18,16 @@ const data = [
     }
 ];
 
-// Global cache to prevent re-fetching blobs when component unmounts/remounts
-const globalBlobCache: Record<string, string> = {};
-
 export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
   const container = useRef<HTMLDivElement>(null);
   
-  const [blobsReady, setBlobsReady] = useState(false);
   const [activeCardIndex, setActiveCardIndex] = useState(0); 
   const activeCardIndexRef = useRef(0);
   
   const [currentStep, setCurrentStep] = useState(0); 
   const targetTimeRef = useRef(data[0].checkpoints[0]);
-  const virtualTimeRef = useRef(data[0].checkpoints[0]);
   const isVideoAnimatingRef = useRef(false);
   const activeDirectionRef = useRef<'forward' | 'backward'>('forward');
-
-  // Preload videos into Blobs for zero-lag scrubbing
-  useEffect(() => {
-    let mounted = true;
-    const fetchBlobs = async () => {
-       const urls = data.flatMap(d => [d.videoUrl, d.reversedVideoUrl]);
-       const toFetch = urls.filter(url => !globalBlobCache[url]);
-       
-       if (toFetch.length > 0) {
-          await Promise.all(toFetch.map(async (url) => {
-             try {
-                const res = await fetch(url);
-                const blob = await res.blob();
-                globalBlobCache[url] = URL.createObjectURL(blob);
-             } catch(e) {
-                console.error("Failed to fetch", url, e);
-                globalBlobCache[url] = url; // fallback
-             }
-          }));
-       }
-       if (mounted) {
-          setBlobsReady(true);
-       }
-    };
-    fetchBlobs();
-    return () => { mounted = false; };
-  }, []);
 
   // Next Project Handler
   const handleNextProject = () => {
@@ -71,14 +39,11 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
      setCurrentStep(0);
      const initialTime = data[(activeCardIndex + 1) % data.length].checkpoints[0];
      targetTimeRef.current = initialTime;
-     virtualTimeRef.current = initialTime;
      activeDirectionRef.current = 'forward';
   };
 
   // 1. Dual-Video Animation Engine
   useEffect(() => {
-    if (!blobsReady) return;
-
     const fwdVid = document.getElementById(`fwd-vid-${activeCardIndex}`) as HTMLVideoElement;
     const revVid = document.getElementById(`rev-vid-${activeCardIndex}`) as HTMLVideoElement;
     if (!fwdVid || !revVid) return;
@@ -86,14 +51,10 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
     // Reset initial state for the newly mounted active project
     if (activeDirectionRef.current === 'forward') {
        fwdVid.style.opacity = '1';
-       virtualTimeRef.current = targetTimeRef.current;
-       fwdVid.currentTime = virtualTimeRef.current;
+       fwdVid.currentTime = targetTimeRef.current;
        revVid.style.opacity = '0';
        revVid.currentTime = (revVid.duration || 10) - targetTimeRef.current;
     }
-
-    fwdVid.play().then(() => fwdVid.pause()).catch(() => {});
-    revVid.play().then(() => revVid.pause()).catch(() => {});
 
     let animationFrameId: number;
 
@@ -104,24 +65,18 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
         const activeDir = activeDirectionRef.current;
 
         if (activeDir === 'forward') {
-          const current = virtualTimeRef.current;
+          const current = fwdVid.currentTime;
           const diff = forwardTarget - current;
           
-          if (Math.abs(diff) > 0.02) {
+          if (diff > 0.05) {
              isVideoAnimatingRef.current = true;
-             
-             // Exact physics curve from the first commit
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
-             
-             // Advance by (delta_time * playbackRate)
-             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
-             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
-             fwdVid.currentTime = virtualTimeRef.current;
+             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); 
+             if (fwdVid.paused) fwdVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
-                virtualTimeRef.current = forwardTarget;
+                fwdVid.pause();
                 fwdVid.currentTime = forwardTarget;
                 isVideoAnimatingRef.current = false;
              }
@@ -129,24 +84,18 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
         } 
         else {
           const reverseTarget = duration - forwardTarget;
-          const current = virtualTimeRef.current;
+          const current = revVid.currentTime;
           const diff = reverseTarget - current;
           
-          if (Math.abs(diff) > 0.02) {
+          if (diff > 0.05) {
              isVideoAnimatingRef.current = true;
-             
-             // Exact physics curve from the first commit
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
-             
-             // Advance by (delta_time * playbackRate)
-             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
-             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
-             revVid.currentTime = virtualTimeRef.current;
+             revVid.playbackRate = 0.5 + (speedProgress * 3.5); 
+             if (revVid.paused) revVid.play().catch(()=>{});
           } else {
              if (isVideoAnimatingRef.current) {
-                virtualTimeRef.current = reverseTarget;
+                revVid.pause();
                 revVid.currentTime = reverseTarget;
                 isVideoAnimatingRef.current = false;
              }
@@ -159,12 +108,10 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
 
     animationFrameId = requestAnimationFrame(renderLoop);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [activeCardIndex, blobsReady]);
+  }, [activeCardIndex]);
 
   // 2. Scroll and Touch Input Handling
   useEffect(() => {
-    if (!blobsReady) return;
-
     let isCoolingDown = false;
     let touchStartY = 0;
 
@@ -181,14 +128,11 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
       }
       
       const fDuration = fwdVid.duration || 10;
-      const rDuration = revVid.duration || 10;
 
       if (direction === 'down') {
         if (activeDirectionRef.current === 'backward') {
            activeDirectionRef.current = 'forward';
-           const newTime = Math.max(0, fDuration - virtualTimeRef.current);
-           virtualTimeRef.current = newTime;
-           fwdVid.currentTime = newTime;
+           fwdVid.currentTime = Math.max(0, fDuration - revVid.currentTime);
            fwdVid.style.opacity = '1';
            revVid.style.opacity = '0';
         }
@@ -201,9 +145,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
       } else {
         if (activeDirectionRef.current === 'forward') {
            activeDirectionRef.current = 'backward';
-           const newTime = Math.max(0, fDuration - virtualTimeRef.current);
-           virtualTimeRef.current = newTime;
-           revVid.currentTime = newTime;
+           revVid.currentTime = Math.max(0, fDuration - fwdVid.currentTime);
            fwdVid.style.opacity = '0';
            revVid.style.opacity = '1';
         }
@@ -249,16 +191,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
       window.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('touchmove', handleTouchMove);
     };
-  }, [blobsReady]);
-
-  if (!blobsReady) {
-    return (
-      <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center font-inter text-white">
-         <div className="w-8 h-8 border-2 border-white/20 border-t-white rounded-full animate-spin mb-6" />
-         <p className="text-white/60 tracking-[0.2em] text-xs uppercase">Initializing Engine</p>
-      </div>
-    );
-  }
+  }, [activeCardIndex]);
 
   return (
     <div ref={container} className="fixed inset-0 z-[100] bg-black overflow-hidden font-inter text-white/90">
@@ -276,7 +209,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           >
             <video
               id={`fwd-vid-${activeCardIndex}`} 
-              src={globalBlobCache[data[activeCardIndex].videoUrl] || data[activeCardIndex].videoUrl}
+              src={data[activeCardIndex].videoUrl}
               className="absolute inset-0 w-full h-full object-cover pointer-events-none transition-opacity duration-150"
               style={{ opacity: 1 }}
               preload="auto"
@@ -286,7 +219,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
 
             <video
               id={`rev-vid-${activeCardIndex}`} 
-              src={globalBlobCache[data[activeCardIndex].reversedVideoUrl] || data[activeCardIndex].reversedVideoUrl}
+              src={data[activeCardIndex].reversedVideoUrl}
               className="absolute inset-0 w-full h-full object-cover pointer-events-none transition-opacity duration-150"
               style={{ opacity: 0 }}
               preload="auto"
@@ -346,7 +279,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
           >
             {/* Thumbnail Video paused at 0 */}
             <video 
-              src={globalBlobCache[data[activeCardIndex].videoUrl] || data[activeCardIndex].videoUrl} 
+              src={data[activeCardIndex].videoUrl} 
               className="absolute inset-0 w-full h-full object-cover" 
               preload="metadata"
             />
