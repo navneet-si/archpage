@@ -30,6 +30,7 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
   
   const [currentStep, setCurrentStep] = useState(0); 
   const targetTimeRef = useRef(data[0].checkpoints[0]);
+  const virtualTimeRef = useRef(data[0].checkpoints[0]);
   const isVideoAnimatingRef = useRef(false);
   const activeDirectionRef = useRef<'forward' | 'backward'>('forward');
 
@@ -68,7 +69,9 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
         return nextIdx;
      });
      setCurrentStep(0);
-     targetTimeRef.current = data[(activeCardIndex + 1) % data.length].checkpoints[0];
+     const initialTime = data[(activeCardIndex + 1) % data.length].checkpoints[0];
+     targetTimeRef.current = initialTime;
+     virtualTimeRef.current = initialTime;
      activeDirectionRef.current = 'forward';
   };
 
@@ -83,7 +86,8 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
     // Reset initial state for the newly mounted active project
     if (activeDirectionRef.current === 'forward') {
        fwdVid.style.opacity = '1';
-       fwdVid.currentTime = targetTimeRef.current;
+       virtualTimeRef.current = targetTimeRef.current;
+       fwdVid.currentTime = virtualTimeRef.current;
        revVid.style.opacity = '0';
        revVid.currentTime = (revVid.duration || 10) - targetTimeRef.current;
     }
@@ -100,18 +104,24 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
         const activeDir = activeDirectionRef.current;
 
         if (activeDir === 'forward') {
-          const current = fwdVid.currentTime;
+          const current = virtualTimeRef.current;
           const diff = forwardTarget - current;
           
-          if (diff > 0.05) {
+          if (Math.abs(diff) > 0.02) {
              isVideoAnimatingRef.current = true;
+             
+             // Exact physics curve from the first commit
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); 
-             if (fwdVid.paused) fwdVid.play().catch(()=>{});
+             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
+             
+             // Advance by (delta_time * playbackRate)
+             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
+             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
+             fwdVid.currentTime = virtualTimeRef.current;
           } else {
              if (isVideoAnimatingRef.current) {
-                fwdVid.pause();
+                virtualTimeRef.current = forwardTarget;
                 fwdVid.currentTime = forwardTarget;
                 isVideoAnimatingRef.current = false;
              }
@@ -119,18 +129,24 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
         } 
         else {
           const reverseTarget = duration - forwardTarget;
-          const current = revVid.currentTime;
+          const current = virtualTimeRef.current;
           const diff = reverseTarget - current;
           
-          if (diff > 0.05) {
+          if (Math.abs(diff) > 0.02) {
              isVideoAnimatingRef.current = true;
+             
+             // Exact physics curve from the first commit
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             revVid.playbackRate = 0.5 + (speedProgress * 3.5); 
-             if (revVid.paused) revVid.play().catch(()=>{});
+             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
+             
+             // Advance by (delta_time * playbackRate)
+             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
+             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
+             revVid.currentTime = virtualTimeRef.current;
           } else {
              if (isVideoAnimatingRef.current) {
-                revVid.pause();
+                virtualTimeRef.current = reverseTarget;
                 revVid.currentTime = reverseTarget;
                 isVideoAnimatingRef.current = false;
              }
@@ -170,7 +186,9 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
       if (direction === 'down') {
         if (activeDirectionRef.current === 'backward') {
            activeDirectionRef.current = 'forward';
-           fwdVid.currentTime = Math.max(0, fDuration - revVid.currentTime);
+           const newTime = Math.max(0, fDuration - virtualTimeRef.current);
+           virtualTimeRef.current = newTime;
+           fwdVid.currentTime = newTime;
            fwdVid.style.opacity = '1';
            revVid.style.opacity = '0';
         }
@@ -183,7 +201,9 @@ export default function ProjectCarousel({ onClose }: { onClose: () => void }) {
       } else {
         if (activeDirectionRef.current === 'forward') {
            activeDirectionRef.current = 'backward';
-           revVid.currentTime = Math.max(0, fDuration - fwdVid.currentTime);
+           const newTime = Math.max(0, fDuration - virtualTimeRef.current);
+           virtualTimeRef.current = newTime;
+           revVid.currentTime = newTime;
            fwdVid.style.opacity = '0';
            revVid.style.opacity = '1';
         }

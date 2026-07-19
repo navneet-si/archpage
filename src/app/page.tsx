@@ -21,6 +21,7 @@ export default function Home() {
   const activeProjectRef = useRef<string | null>(null);
   
   const targetTimeRef = useRef(CHECKPOINTS[0]);
+  const virtualTimeRef = useRef(CHECKPOINTS[0]);
   const isAnimatingRef = useRef(false);
   const activeDirectionRef = useRef<'forward' | 'backward'>('forward');
 
@@ -67,21 +68,22 @@ export default function Home() {
 
         // --- FORWARD SCROLLING ---
         if (activeDir === 'forward') {
-          const current = fwdVid.currentTime;
+          const current = virtualTimeRef.current;
           const diff = forwardTarget - current;
           
-          if (diff > 0.05) {
+          if (Math.abs(diff) > 0.02) {
              isAnimatingRef.current = true;
              
-             // Dynamic Cinematic Easing
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             fwdVid.playbackRate = 0.5 + (speedProgress * 3.5); // Max 4.0x
+             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
              
-             if (fwdVid.paused) fwdVid.play().catch(()=>{});
+             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
+             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
+             fwdVid.currentTime = virtualTimeRef.current;
           } else {
              if (isAnimatingRef.current) {
-                fwdVid.pause();
+                virtualTimeRef.current = forwardTarget;
                 fwdVid.currentTime = forwardTarget;
                 isAnimatingRef.current = false;
              }
@@ -90,22 +92,23 @@ export default function Home() {
         // --- BACKWARD SCROLLING (Via Pre-Calculated Reversed Video) ---
         else {
           const reverseTarget = duration - forwardTarget;
-          const current = revVid.currentTime;
+          const current = virtualTimeRef.current;
           const diff = reverseTarget - current;
           
           // We are playing the REVERSED video FORWARD towards the reverseTarget!
-          if (diff > 0.05) {
+          if (Math.abs(diff) > 0.02) {
              isAnimatingRef.current = true;
              
-             // Same dynamic easing, but applied to the reversed video
              const distance = Math.abs(diff);
              const speedProgress = Math.min(distance / 1.5, 1.0);
-             revVid.playbackRate = 0.5 + (speedProgress * 3.5); // Max 4.0x
+             const virtualPlaybackRate = 0.5 + (speedProgress * 3.5);
              
-             if (revVid.paused) revVid.play().catch(()=>{});
+             const timeStep = Math.min(0.0166 * virtualPlaybackRate, distance);
+             virtualTimeRef.current = current + (diff > 0 ? timeStep : -timeStep);
+             revVid.currentTime = virtualTimeRef.current;
           } else {
              if (isAnimatingRef.current) {
-                revVid.pause();
+                virtualTimeRef.current = reverseTarget;
                 revVid.currentTime = reverseTarget;
                 isAnimatingRef.current = false;
              }
@@ -143,7 +146,9 @@ export default function Home() {
         // If we were previously rewinding, sync the forward video to the reverse video's current position
         if (activeDirectionRef.current === 'backward') {
            activeDirectionRef.current = 'forward';
-           fwdVid.currentTime = Math.max(0, fwdVid.duration - revVid.currentTime);
+           const newTime = Math.max(0, fwdVid.duration - virtualTimeRef.current);
+           virtualTimeRef.current = newTime;
+           fwdVid.currentTime = newTime;
            fwdVid.style.opacity = '1';
            revVid.style.opacity = '0';
         }
@@ -157,7 +162,9 @@ export default function Home() {
         // If we were previously scrolling forward, sync the reverse video to the forward video's current position
         if (activeDirectionRef.current === 'forward') {
            activeDirectionRef.current = 'backward';
-           revVid.currentTime = Math.max(0, fwdVid.duration - fwdVid.currentTime);
+           const newTime = Math.max(0, fwdVid.duration - virtualTimeRef.current);
+           virtualTimeRef.current = newTime;
+           revVid.currentTime = newTime;
            fwdVid.style.opacity = '0';
            revVid.style.opacity = '1';
         }
