@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ProjectCarousel from '@/components/ProjectCarousel';
+import MajorProjects from '@/components/MajorProjects';
 
 // The specific timestamps to pause at (in the forward timeline)
 const CHECKPOINTS = [0, 5.5, 10];
@@ -318,13 +319,13 @@ export default function Home() {
                 <nav className="flex flex-col gap-6 pointer-events-auto items-start">
                   {[
                     "VIEW HOUSES", 
-                    "OPTION 2 (TBD)", 
+                    "MAJOR PROJECTS", 
                     "OPTION 3 (TBD)"
                   ].map((item, i) => (
                     <motion.button
                       key={item}
                       onClick={() => {
-                        if (item === "VIEW HOUSES") {
+                        if (item === "VIEW HOUSES" || item === "MAJOR PROJECTS") {
                           setActiveProject(item);
                           activeProjectRef.current = item;
                         }
@@ -421,8 +422,16 @@ export default function Home() {
       </div>
       
       {/* Project Carousel Overlay */}
-      {activeProject && (
+      {activeProject === "VIEW HOUSES" && (
         <ProjectCarousel onClose={() => {
+          setActiveProject(null);
+          activeProjectRef.current = null;
+        }} />
+      )}
+
+      {/* Major Projects Overlay */}
+      {activeProject === "MAJOR PROJECTS" && (
+        <MajorProjects onClose={() => {
           setActiveProject(null);
           activeProjectRef.current = null;
         }} />
